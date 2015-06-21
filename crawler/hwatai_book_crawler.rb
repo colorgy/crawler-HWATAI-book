@@ -49,6 +49,18 @@ class HwataiBookCrawler
               attribute.match(/定           價：(?<n>.+)/) {|m| price ||= m[1].gsub(/[^\d]/, '').to_i}
             end
 
+            # use isbn param in url
+            if url && isbn.nil?
+              binding.pry
+              isbn_param = url.match(/(?<=\?isbn\=).+/)[0]
+              if isbn_param.length == 10
+                isbn_tmp = "978#{isbn_param[0..-2]}"
+                isbn = "#{isbn_tmp}#{isbn_checksum(isbn_tmp)}"
+              elsif isbn_param.length == 13
+                isbn = isbn_param
+              end
+            end
+
             if url && rr = RestClient.get(url)
               detail_doc = Nokogiri::HTML(rr)
 
@@ -80,6 +92,25 @@ class HwataiBookCrawler
     ThreadsWait.all_waits(*@threads)
     @books
   end
+
+  def isbn_checksum(isbn)
+    isbn.gsub!(/[^(\d|X)]/, '')
+    c = 0
+    if isbn.length <= 10
+      10.downto(2) {|i| c += isbn[10-i].to_i * i}
+      c %= 11
+      c = 11 - c
+      c ='X' if c == 10
+      return c
+    elsif isbn.length <= 13
+      (1..11).step(2) {|i| c += isbn[i].to_i}
+      c *= 3
+      (0..11).step(2) {|i| c += isbn[i].to_i}
+      c = (220-c) % 10
+      return c
+    end
+  end
+
 end
 
 cc = HwataiBookCrawler.new
