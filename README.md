@@ -3,5 +3,5 @@
 
 TODOs:
 
-1. isbn 10 & isbn 13 conversion
+1. <del>isbn 10 & isbn 13 conversion</del> DONE
 2. better threads
