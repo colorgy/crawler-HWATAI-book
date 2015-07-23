@@ -1,6 +1,7 @@
 require 'crawler_rocks'
 require 'iconv'
 require 'pry'
+require 'book_toolkit'
 
 require 'thread'
 require 'thwait'
@@ -8,7 +9,10 @@ require 'thwait'
 class HwataiBookCrawler
   include CrawlerRocks::DSL
 
-  def initialize
+  def initialize  update_progress: nil, after_each: nil
+    @update_progress_proc = update_progress
+    @after_each_proc = after_each
+
     @search_url = "http://www.hwatai.com.tw/webc/html/book/02.aspx"
   end
 
@@ -39,25 +43,25 @@ class HwataiBookCrawler
             url = row.css('.more a').map{|href| href[:href]}.first
             url && url = URI.join(@search_url, url).to_s
 
-            name = nil; category = nil; author = nil; isbn = nil; edition = nil; price = nil;
+            name = nil; category = nil; author = nil; isbn = nil; edition = nil; original_price = nil;
+            invalid_isbn = nil
             publisher = nil;
             row.css('.newstable tr').map{|tr| tr.text.strip.gsub(/\s+/, ' ')}.delete_if {|txt| txt.empty?}.each do |attribute|
               attribute.match(/書           名：(?<n>.+)/) {|m| name ||= m[1].strip}
               attribute.match(/作    譯    者：(?<n>.+)/) {|m| author ||= m[1].strip}
               attribute.match(/I S B N - 13：(?<n>.+)/) {|m| isbn ||= m[1].strip}
               attribute.match(/類           別：(?<n>.+)/) {|m| category ||= m[1].strip}
-              attribute.match(/定           價：(?<n>.+)/) {|m| price ||= m[1].gsub(/[^\d]/, '').to_i}
+              attribute.match(/定           價：(?<n>.+)/) {|m| original_price ||= m[1].gsub(/[^\d]/, '').to_i}
             end
 
             # use isbn param in url
             if url && isbn.nil?
-              binding.pry
               isbn_param = url.match(/(?<=\?isbn\=).+/)[0]
-              if isbn_param.length == 10
-                isbn_tmp = "978#{isbn_param[0..-2]}"
-                isbn = "#{isbn_tmp}#{isbn_checksum(isbn_tmp)}"
-              elsif isbn_param.length == 13
-                isbn = isbn_param
+
+              begin
+                isbn = BookToolkit.to_isbn13(isbn_param)
+              rescue Exception => e
+                invalid_isbn = isbn_param
               end
             end
 
@@ -70,18 +74,24 @@ class HwataiBookCrawler
               end
             end
 
-            @books << {
+            book = {
               name: name,
               author: author,
               category: category,
               isbn: isbn,
-              price: price,
+              invalid_isbn: invalid_isbn,
+              original_price: original_price,
               edition: edition,
               publisher: publisher,
               url: url,
-              external_image_url: external_image_url
+              external_image_url: external_image_url,
+              known_supplier: 'hwatai'
             }
-            print "|"
+
+            @after_each_proc.call(book: book) if @after_each_proc
+
+            @books << book
+            # print "|"
           end # end detail thread
 
           ThreadsWait.all_waits(*@detail_threads)
@@ -93,25 +103,7 @@ class HwataiBookCrawler
     @books
   end
 
-  def isbn_checksum(isbn)
-    isbn.gsub!(/[^(\d|X)]/, '')
-    c = 0
-    if isbn.length <= 10
-      10.downto(2) {|i| c += isbn[10-i].to_i * i}
-      c %= 11
-      c = 11 - c
-      c ='X' if c == 10
-      return c
-    elsif isbn.length <= 13
-      (1..11).step(2) {|i| c += isbn[i].to_i}
-      c *= 3
-      (0..11).step(2) {|i| c += isbn[i].to_i}
-      c = (220-c) % 10
-      return c
-    end
-  end
-
 end
 
-cc = HwataiBookCrawler.new
-File.write('hwatai_books.json', JSON.pretty_generate(cc.books))
+# cc = HwataiBookCrawler.new
+# File.write('hwatai_books.json', JSON.pretty_generate(cc.books))
